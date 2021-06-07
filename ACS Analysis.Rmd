@@ -1,0 +1,837 @@
+---
+title: "AMOD 5250 - Final Project"
+output:
+  html_document:
+    df_print: paged
+---
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+if (!require("pacman")) {
+      install.packages("pacman", dependencies=TRUE, repos='http://cran.rstudio.com/')
+      library(pacman)
+}
+
+# packages used in this report:
+pacman::p_load("tidyverse")
+load("Latest12th2am.RData")
+library(readr)
+library(knitr)
+library(rstatix)
+library(chisq.posthoc.test)
+library(emmeans)
+options(scipen=999)
+
+```
+
+
+## 1. Data Summary
+An analysis on the (ACS) dataset was done using Person data, to investigate the racial differences that exist between the black and white communites in America. Variables such as income, sex, education, employment status, class of worker, and hours worked were explored. In addition, adjustments for income and person weights were also factored in to correct for inflation, and in the case of person weights, multiple people in one row. Some of the variables in this data such as income were top-coded, so that anonymity was maintained. To further highlight some of the differences that exist between the two communities, the data was reduced down to people that had at least a high school diploma, to ensure that everyone in the sample had a basic education. This reduction brought the sample to just north of 7.3 million down from about 15 million. Upon importing the data, many of the variables in the data were factored, as well as renamed. This included variables like sex, education, employment status, class of worker, etc. Factor levels for employment status, and class of worker were grouped together. For example, factors for government employees in class of worker were grouped together for the federal, state, and local levels. 
+
+### Race
+In terms of the racial make up of this sample, there were a total of 7,324,976 people, of which 87.4% were White and 12.6% were Black. When factoring in person weights, the total sample was 141,410,512. It was clear that in this sample there was a disproportionately larger amount of people from a White racial background, which would need to be considered when conducting any analysis. 
+
+
+**Table 1**: A summary of the proportion of Black and White people in the dataset, when factoring in person weights.
+```{r, echo=FALSE}
+df %>%
+  group_by(Race) %>%
+  summarise(n = sum(Person_weights)) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  kable(format = "markdown")
+```
+
+ 
+```{r, echo=FALSE}
+df %>%
+  ggplot() +
+  geom_bar(mapping = aes(x = Race, fill = Race, weight = Person_weights)) +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Population by race")
+```
+
+**Figure 1**: A bar graph comparing population by race. This graph illustrates a large difference between the number of people in the sample from white and black racial backgrounds. 
+
+
+### Sex
+A breakdown of race by sex was also explored in this sample by creating a table of relative proportions, and a graph to visualize the differences. In each case there were a greater number of females, consisting of more than 50% of the sample. Person weights were also factored in the analysis.
+
+
+**Table 2**: Relative proportions of race by sex. In both races, females made up a greater proportion of the sample.
+```{r, echo=FALSE}
+df %>%
+  group_by(Race, Sex) %>%
+  summarise(n = sum(Person_weights)) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  kable(format = "markdown")
+```
+
+
+
+```{r, echo=FALSE}
+df %>%
+  group_by(Sex, Race) %>%
+  summarise(n = sum(Person_weights)) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n) * 100)) %>%
+  ggplot(aes(x = Race, y = percent, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  ylab("Percentage (%)") +
+  ggtitle("Proportion of Race by Sex")
+```
+
+**Figure 2**: A bar graph looking at the differences in race by sex. In both cases, there is a higher percentage of females. 
+
+
+### Income 
+
+<div class="ans">
+**Table 3**: 5 # summary table for income. The mean income is `r mean(df$Income)`, while the minimum is `r min(df$Income)`, and the max income is `r max(df$Income)`. 
+</div>
+```{r, echo=FALSE}
+summary(df$Income)
+```
+
+Distributions of income were observed for the total income distribution. The distribution for total annual income was right skewed, and appeared to taper off at around $200,000 - $250,000.
+
+```{r, echo=FALSE}
+ggplot(df) +
+  geom_histogram(aes(Income, weight = Person_weights), alpha = 0.5, bins = 30, fill = "red") +
+  ggtitle("Total Income Distribution") +
+  xlab("Income (1000s)")
+```
+
+**Figure 4**: Total income distribution in thousands. The data in the distribution is right skewed, with most of the population of the United States earning less than $200,000.
+
+
+### Education
+The data within the educational attainment variable had to be reduced to remove people that had not completed high school or at least obtained a GED. The different levels of educational attainment were compared to get a sense of the make up of the sample. In terms of educational attainment, people with a high school diploma made up the largest proportion of the sample, while people holding doctorate degrees were the smallest. This was expected as the public education system is free, and mandatory for students up to grade 10, while doctorates on the other hand, or any form of higher education in general can be expensive and time consuming which means there will be less people in those groups.  
+
+
+**Table 4**: Proportion table looking at educational attainment of the population. 
+```{r, echo=FALSE}
+df %>%
+  group_by(Education) %>%
+  summarise(n = sum(Person_weights)) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  ungroup() %>%
+  kable(format = "markdown")
+```
+
+
+```{r, echo=FALSE}
+ggplot(df) +
+  geom_bar(mapping = aes(Education, fill = Education, weight = Person_weights)) +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparing Levels of Education")
+```
+
+**Figure 5**: A bar graph comparing levels of educational attainment among the population in the sample. People with high school diplomas make up the greatest proportion, while those with doctorates make up the smallest proportion.
+
+
+```{r, echo=FALSE}
+degrees <- c("HS_diploma", "Bachelors", "Masters", "Prof_Deg")
+df %>%
+  filter(Education %in% degrees) %>%
+  group_by(Education, Hours_worked) %>%
+  summarise(averageincome = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = averageincome, color = Education)) +
+  geom_point() +
+  scale_color_manual(values = c("purple", "green", "blue", "red")) +
+  ggtitle("Annual Income for Education Level for Hours Worked") +
+  xlab("Hours") +
+  ylab("Income (1000s)")
+```
+
+**Figure 6**: A scatterplot illustrating the difference in annual income by education level for hours worked. People with a professional degree make the highest income, while those with a high school diploma make the least. 
+
+
+## 2. Methodology
+
+The intention for this analysis was to determine whether there were significant differences between the black and white community across multiple variables.  After the data cleaning process, renaming variables, factoring, and factor reduction, I began my analysis by looking into the make-up of the data. To begin, the variable income was adjusted for inflation using an income adjustment as this data was collected over a 5 year period. The dataset also required an adjustment for person weights, which was applied in some cases. I decided not to remove outliers from the data which may impact the generalizability of the results and skew some data. 
+
+When comparing income I found that the data for both the black and white community was heavily skewed as there were individuals in the population that were making significant amounts of money. However, this is expected because in a country like the United States, a significant amount of the wealth is in the hands of few, so much so that it is estimated the wealthiest 1% own as much as the bottom 50% combined. In this cases I decided not to remove any outliers when comparing income across race, education, class of worker, education level and hours worked. The income distribution was skewed so it was broken up into parts to get an understanding of the different segments of the population. The differences between the two communities were much easier to detect as higher income people tend to sit at the tail of the distribution.  The distribution was analyzed in 3 parts (under $250,000, over $250,000 and over $500,000). These distributions can be found in the appendix. 
+
+I then began my analysis of comparing race across multiple different variables.  When comparing the proportion of people laid off from work by race, the overall proportion of people that were laid off was quite small compared to those that said no or did not respond. This graph can be found in the appendix section. I then decided to create a graph of just those people who were laid off by race to see if there was a more obvious difference between the two. When analyzing the population by race and class of worker, I noticed that the difference between black and white private and government employees looked interesting, and decided I would look into those a little further. I decided not to use the graph for the overall comparison of class of worker by race which can be found in the appendix. When comparing income vs hours worked, by education and race I decided to exclude people with GED, and associate degrees in order to keep the degrees and diplomas that are most commonly familiar. I created graphs for each one and decided to place them in the appendix while only keeping a stacked plot which includes all of the education levels. There were graphs created that compared employment status by race, as well as graphs for race by region (5 US regions), and income by race across the 5 regions of the US. Lastly, there was a graph comparing commute time by race. I decided to exclude these from the main findings as they did not seem very interesting.
+
+In terms of the statistical analysis I decided to conduct a t-test to determine whether there were any significant differences in income between the black and white community. I conducted a chi-square test for independence to determine whether there was an association between race and being laid off. I also decided to investigate whether race and education both had an effect on income by using a 2 way anova test. Lastly, I created a multiple linear regression model to look at the relationship between income and hours worked for class of worker and race. 
+
+
+## 3. Findings
+
+### Race vs. Income
+
+For my analysis of income by race I decided to only analyze the incomes of the population that earn less than $200,000, since the focus of this analysis were average American citizens who have a higher likelihood of dealing with inequalities. Looking at the total income distribution it was obvious that there was a large right-skew which would not help with gaining a clear understanding of the differences between race and income. 
+
+**Table 5**: Summary table of income by race. Looking at the results, the mean income of white people is higher than the mean income of black people. 
+```{r, echo=FALSE}
+incra <- df %>%
+  select(Race, Income) %>%
+  filter(Income < 200000) %>%
+  group_by(Race) %>%
+  get_summary_stats(Income, type = "mean_sd")
+kable(incra, format = "markdown")
+```
+
+
+Here is a boxplot of income by race which indicates that the mean income of white people is higher than the mean income of black people as expected from the tabular summary. The income on both distributions is positively skewed, however there appears to be a bit more of a stronger positive skew in income for the distribution of black people. 
+```{r, echo=FALSE}
+tdf <- df %>%
+  select(Race, Income) %>%
+  filter(Income < 200000)
+ggplot(tdf, aes(x = Race, y = Income, fill = Race)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparing Income by Race")
+```
+
+**Figure 4**: Boxplot of income by race for incomes less than $200,000. White people have a higher mean income. 
+
+We can assume that the data is normal due to large sample size. The variance test resulted in a p-value < .05, so a Welch's t-test was used to accommodate for the heterogeneity of variances. The Welch's two sample t-test resulted in a p-value < .05, which means we can conclude that there is a significant difference in mean incomes betewen white and black people. 
+```{r, echo=FALSE}
+tdf <- df %>%
+  select(Race, Income) %>%
+  filter(Income < 200000)
+var.test(Income ~ Race, data = tdf)
+```
+```{r, echo=FALSE}
+t.test(Income ~ Race, data = tdf, var.equal = FALSE)
+```
+
+```{r, echo=FALSE}
+dfsummary <- df %>%
+  group_by(Race) %>%
+  summarize(income.mean=mean(Income),
+            income.sd=sd(Income),
+            Lower=income.mean - 2 * income.sd / sqrt(NROW(Income)),
+            Upper=income.mean + 2 * income.sd / sqrt(NROW(Income)))
+
+
+ggplot(dfsummary, aes(x=income.mean, y = Race)) + 
+  geom_point() +
+  geom_errorbarh(aes(xmin=Lower, xmax=Upper), height=.2)
+
+```
+
+**Figure 5**: A scatterplot to visualize that the error bars of mean income do not overlap, which means that even without conducting a t-test we can reasonably believe the mean incomes for both races are significantly different.
+
+
+### Layoff by Race
+
+I decided to investigate whether there was an association between race and being laid off. More specifically, whether black people were more likely to be laid off than white people. 
+
+```{r, echo=FALSE}
+df %>%
+  group_by(Race, Layoff) %>%
+  summarise(n = sum(Person_weights)) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  filter(Layoff == "Yes") %>%
+  ggplot(aes(x = Layoff, y = percent, fill = Race)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparing Layoffs by Race") +
+  xlab("Layoffs") +
+  ylab("Percent (%)")
+```
+
+**Figure 6**: A bar-graph comparing the relative proportion of layoffs by race. Black people were relatively laid off more. 
+
+
+A chi-square test for independence resulted in a p-value < .05, which indicates that we can conclude race and being laid off are significantly linked. A post-hoc test was necessary to determine who was more likely to be laid off. As can be seen, a positive residual value of 32.09612 under "Yes" for Black people is positive and a value of -32.09612 is negative for white people. We can therefore conclude that black people are more likely to be laid off. 
+
+```{r, echo=FALSE}
+
+racelaytbl <- table(df$Race, df$Layoff)
+chisq.test(racelaytbl)
+chisq.posthoc.test(racelaytbl)
+```
+
+### Annual income for education level by hours worked
+
+
+```{r, echo=FALSE}
+df %>%
+  filter(Education %in% degrees) %>%
+  group_by(Race, Hours_worked, Education) %>%
+  summarise(averageincome = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = averageincome, color = Race)) +
+  geom_point() +
+  facet_grid(vars(Education), scales = "free") +
+  scale_color_manual(values = c("red", "blue")) +
+  ggtitle("Annual Income for Hours Worked by Education") +
+  xlab("Hours") +
+  ylab("Income (1000s)")
+```
+
+**Figure 7**: A stacked scatterplot comparing the differences in income vs hours worked for education level and race. In every level of education, white people tend to earn more than black people for the same number of hours worked.
+
+
+I conducted a two-way anova to examine the effects of race and education on income. Despite a heavily skewed income distribution, I decided to conduct the test across the entire range because filtering the data under $200,000 might result in the exclusion of a lot of people with professional and doctorate degrees that tend to earn greater amounts. Looking at the boxplot we can see that there is a heavy amount of positive skew, and in every case, the mean income for the white community is higher than the black community.
+```{r, echo=FALSE}
+aovtest <- df %>%
+  select(Education, Race, Income)
+ggplot(aovtest, aes(x = Education, y = Income, fill = Race)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparsion of Income by Education and Race")
+education.grouping <- group_by(aovtest, Education, Race)
+```
+
+**Figure 8**: A boxplot comparing income vs education by race. The plot appears to be heavily positively skewed, with the white community earning more on every education level. 
+
+
+**Table 5**: A summary table of mean and standard deviation values. In every case, the mean income is higher for the white community with the same level of education.
+```{r, echo=FALSE}
+get_summary_stats(education.grouping, Income, type = "mean_sd")
+```
+
+
+```{r, eval=FALSE, echo=FALSE}
+identify_outliers(education.grouping, Income)
+```
+
+The analysis revealed that there were extreme outliers, however I chose not to remove them since there were quite a few, and in the real world we can expect that some people will earn a significantly greater amount than the rest of the population. Since this dataset is large, we can assume the assumption of normality has been satisfied. A levene's for homogeneity of variance indicated a p-value < .05, so a type "III" test was used to adjust for this violation of homogeneity of variances. The results of the anova test indicate that there was a significant effect between education and race on income, F(6,7324962) = 979.80, p < .05, n^2 = .000802.
+```{r, echo=FALSE}
+levene_test(aovtest, Income ~ Race*Education)
+anova_test(aovtest, Income ~ Race*Education, type = "III")
+```
+
+
+A Tukey post-hoc test was conducted to analyze all pairwise comparisons between different levels of education groups organized by gender. Because the two-way anova was complex, I created a linear model of the complex effect to feed the resulting error into a one-way anova of a simpler effect. This was done to look into the interaction effect. The results showed a significant difference in mean income between black and whites on every level of education.
+```{r, echo=FALSE}
+model <- lm(Income ~ Race*Education, data = aovtest, type = 'III')
+education.grouping <- group_by(aovtest, Education)
+anova_test(education.grouping, Income ~ Race, error = model, type = "III")
+emmeans_test(education.grouping, Income ~ Race, p.adjust.method = "bonferroni")
+```
+
+### The relationship between income, class of worker, and race 
+
+```{r, echo=FALSE}
+df %>%
+  filter(Worker_class == "Private Employee") %>%
+  group_by(Race, Hours_worked) %>%
+  summarise(incomeaverage = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = incomeaverage, color = Race)) +
+  geom_point() +
+  scale_color_manual(values = c("Red", "Blue")) +
+  xlab("Hours") +
+  ylab("Income (1000s)") +
+  ggtitle("Annual Income by Hours Worked for Private Employees")
+
+```
+
+**Figure 9**: A scatterplot comparing the relationship between income and hours worked for private employees by race. The scatterplot appears to show a linear relationship and that on average white employees make more than black employees in the private sector.
+
+```{r, echo=FALSE}
+privatemodel <- df %>%
+  filter(Worker_class == "Private Employee") %>%
+  group_by(Hours_worked, Race) %>%
+  summarise(incomeaverage = weighted.mean(Income, Person_weights))
+pmodel <- lm(incomeaverage ~ Race + Hours_worked, data = privatemodel)
+summary(pmodel)
+pmodel.coef <- summary(pmodel)$coef
+```
+
+<div class="ans">
+I conducted a multiple linear regression to examine the relationship between income, class of worker, and race. I decided to narrow down and look specifically at this relationship for people working in private companies as this makes up a good proportion of the American economy. Looking at the residuals of the regression to determine how well the model fits the data, we can see that the median value is quite large which indicates a high error. Although there appears to be a high error, the 1st and 3rd quartiles appear to be somewhat symmetrical around the median. The min and max values however appear to be skewed which would have to be examined in a residual plot to check for any assumption violations. The results of this regression tell us that the intercept is `r pmodel.coef["(Intercept)", "Estimate"]` when all other values are 0. The result for the regression coefficient of RaceBlack indicates that for all else held constant, a unit increase results in a decrease in `r pmodel.coef["RaceBlack", "Estimate"]` and a p-value of `r pmodel.coef["RaceBlack", "Pr(>|t|)"]` which tells us that Race has a significant effect on the model. The slope for hours worked tells us that for all things kept constant, a unit increase in hours worked will result in average income increasing by `r pmodel.coef["Hours_worked", "Estimate"]`. The p-value for the F statistic of this model indicates that there is a significant difference, which means we can reject our null hypothesis and conclude that the combination of race and hours worked does have an effect on income. Overall, we can say that 67.29% of the variation in the model can be explained by the predictors.
+</div>
+
+
+Looking at the Residuals vs. Fitted plot, the red line is not perfectly horizontal, which indicates that for the model the relationship was not as linear as it was supposed to be. In terms of variance, the points on the plot appear to not appear to be completely random and there is a bit of a pattern. Most of the data on the normal QQ plot appears to be normally distributed as they are fairly close to the line. Looking at the scale-location plot, the red line is not completely horizontal, which indicates it might be an issue for the spread. There are also a few outliers so it might make sense to remove them and see if it produces a better result. Overall seems like it may be a concern for homoscedasticity. Lastly for the residuals vs leverage plot, it may be a good idea to remove the outlier at 194 since it seems a bit high. In terms of leverage, the red line appears to be curved, so removing that is potentially high leverage might produce a better fit.
+
+```{r, echo=FALSE}
+plot(pmodel)
+```
+
+**Figure 10**: Diagnostic plots to assess whether the linear model is appropriate. 
+
+## Discussion
+
+The intention of this analysis was to determine whether there were differences between the black and white community across multiple factors. After conducting multiple analyses, there were several significant differences found between the black and white communities in America. The results of a two sample t test indicated that there were significant differences in income across race. Looking at the proportion of layoffs compared across race, the results of a Chi-squared test for independence showed that black people were significantly more likely to be laid off from work. A 2 way anova was also conducted to look at the relationship between income and hours worked for education and race. The results showed that on all levels, blacks made significantly less income. Lastly, a multiple linear regression model was used to examine the relationship between income and hours worked for private employees by race. The results showed that the predictors accounted for 67.29% of the variation in the model, and that there was a significant relationship. 
+
+There were also some potential limitations in this analysis that should be considered. There were some parts of the analysis where person weights and weighted means for income were not included. For the analyses of race vs income, layoff by race, and income vs hours worked for education and race, the weights were not included due to memory cache issues, which means that the outputs are not as accurate as they should be. As a result this may introduce biases in the data. In addition, in all the analyses there were outliers which in some cases were extreme that were not removed from the models. This introduces the possibility of the data being skewed, and some assumptions being violated. This was especially true in the case of the multiple regression, where the diagnostic plots indicated a few issues. Redoing the model by removing outliers may produce a more accurate result and a better fitting model. In all cases, missing data was filtered out of the analysis and unaccounted for. In terms of generalizability, this could be a problem as it may produce biases in the data. Overall, despite the fact that there was a big size difference in sample sizes for race, I do think that the models are believable as there was a consistent trend in each test. The strength of those differences however, is debatable. 
+
+
+## Appendix
+
+```{r, eval=FALSE}
+library(readr)
+library(tidyverse)
+library(rstatix)
+library(knitr)
+install.packages("chisq.posthoc.test")
+library(chisq.posthoc.test)
+
+# Creating vector of columns to import from the dataset
+cols <- c("SERIALNO", "RT", "SPORDER", "PUMA", "AGEP", "SCHL", "SCH", "RAC1P", "ENG", "PINCP", "ADJINC", "WAGP", "NWLA", "SEX", "CIT", "ST", "DIVISION", "REGION", "COW", "FER", "HINS1", "HINS2", "JWMNP", "MAR", "ESR", "WKHP", "PWGTP")
+
+# Reading in the data using read_csv
+df1 <- read_csv("psam_pusa.csv", col_types = cols(SERIALNO = col_character(), ST = col_number()))
+df2 <- read_csv("psam_pusb.csv", col_types = cols(SERIALNO = col_character()))
+df3 <- read_csv("psam_pusc.csv", col_types = cols(SERIALNO = col_character()))
+df4 <- read_csv("psam_pusd.csv", col_types = cols(SERIALNO = col_character()))
+
+# Filtering datasets using cols vector to keep necessary variables
+df1 <- df1 %>%
+  select(cols)
+df2 <- df2 %>%
+  select(cols)
+df3 <- df3 %>%
+  select(cols)
+df4 <- df4 %>%
+  select(cols)
+
+# Binding all 4 datasets 
+df <- bind_rows(df1, df2, df3, df4)
+load("dfbeforeallchangeswith2new.RData")
+# Renaming columns
+names(df) <- c("SERIALNO", "Record_type", "Person_number", "PUMA", "Age", "Education", "School_enrollment", "Race", "Speaks_english", "Total_income", "Income_adjustment", "Income_12_months", "Layoff", "Sex", "Citizenship", "State", "USA_region9", "Region5", "Worker_class", "Birth_12months", "Insurance_co", "Insurance_dir", "Commute_time", "Married", "Employment_status", "Hours_worked", "Person_weights")
+
+# Save the df
+save(df, file = "Projectdf.RData")
+# This is df without factors
+load("Projectdf.RData")
+
+# Changing columns to factors 
+
+df$Sex <- factor(df$Sex, levels = c(1,2), labels = c("Male", "Female"))
+
+# NA = Less than 3 y/o
+# Filtering for Grade 9-
+schooling <- c(16, 17, 20:24)
+df <- df %>%
+  filter(Education %in% schooling)
+df$Education <- factor(df$Education, levels = c(16,17,20,21,22,23,24),
+                       labels = c("HS_diploma", "GED", "Associate_Deg", "Bachelors", "Masters", "Prof_Deg", "Doctorate"))
+
+# NA = less than 3 y/o, Pubsch = public school, Coll = Public college, PS = Private school, PC = Private college, HomeSC = homeschool 
+df$School_enrollment <- factor(df$School_enrollment, levels = c(1,2,3),
+                               labels = c("Notlast3mo", "PubSch/Coll", "PS/PC/HomeSc"))
+
+# Filtering for people who are from black or white racial backgrounds
+races <- c(1,2)
+df <- df %>%
+  filter(Race %in% races)
+df$Race <- factor(df$Race, levels = c(1,2), labels = c("White", "Black"))
+
+# Relabelling and factoring english speaking ability
+df$Speaks_english <- factor(df$Speaks_english, levels = c(1:4), labels = c("Very well", "Well", "Not well", "Not at all"))
+
+# relabelling Layoffs
+df$Layoff <- factor(df$Layoff, levels = c(1:3), labels = c("Yes", "No", "Did not report"))
+
+# natural = naturalization
+df$Citizenship <- factor(df$Citizenship, levels = c(1:5), labels = c("Born in US", "US territories", "Born abroad US parents", "US by natural", "Not citizen"))
+
+# Relabelling ST columns
+df$State <- factor(df$State, levels = c(1,2,4,5,6,8,9,10,11,12,13,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,44,45,46,47,48,49,50,51,53,54,55,56,72), 
+                   labels = c("Alabama", "Alaska", "Arizona", "Arkansas",
+                              "California", "Colorado", "Connecticut",
+                              "Delaware", "DC", "Florida", "Georgia",
+                              "Hawaii", "Idaho", "Illinois", "Indiana",
+                              "Iowa", "Kansas", "Kentucky", "Louisiana",
+                              "Maine", "Maryland", "Massachusetts", 
+                              "Michigan", "Minnesota", "Mississippi",
+                              "Missouri", "Montana", "Nebraska", "Nevada", 
+                              "New Hampshire", "New Jersey", "New Mexico", 
+                              "New York", "North Carolina", "North Dakota", 
+                              "Ohio", "Oklahoma", "Oregon", "Pennsylvania", 
+                              "Rhode Island", "South Carolina", "South Dakota",
+                              "Tennessee", "Texas", "Utah", "Vermont", 
+                              "Virginia", "Washington", "West Virginia",
+                              "Wisconsin", "Wyoming", "Puerto Rico"))
+
+# Factoring/Relabelling Region9
+df$USA_region9 <- factor(df$USA_region9, levels = c(1:10), labels = c("Puerto Rico", "New England", "Middle Atlantic", "East North Central", "West North Central", "South Atlantic", "East South Central", "West South Central", "Mountain", "Pacific"))
+
+# Factoring/Relabelling Region5
+df$Region5 <- factor(df$Region5, levels = c(1,2,3,4,9), labels = c("Northeast", "Midwest", "South", "West", "Puerto Rico"))
+
+# Factoring/relabelling Worker_class
+df$Worker_class <- factor(df$Worker_class, levels = c(1:9), labels = c("Private fpcbi", "Private nfptc", "Local gov emp", "State employee", "Federal employee", "Self employed", "Self employed 2", "Working without pay", "Unemployed"))
+
+# Factoring/Relabelling Birth over the last 12 months.
+df$Birth_12months <- factor(df$Birth_12months, levels = c(1,2), labels = c("Yes", "No"))
+
+# Factoring/relabelling Insurance through company
+df$Insurance_co <- factor(df$Insurance_co, levels = c(1,2), labels = c("Yes", "No"))
+
+# # Factoring/Relabelling Insurance directly
+df$Insurance_dir <- factor(df$Insurance_dir, levels = c(1,2), labels = c("Yes", "No"))
+
+# # Factoring/Relabelling Employment status recode
+df$Employment_status <- factor(df$Employment_status, levels = c(1:6), labels = c("Civillian", "Civillian2", "Unemployed", "Armed forces", "Armed forces2", "Not in LF"))
+
+# Collapsing ESR factors
+df$Employment_status2 <- fct_collapse(df$Employment_status,
+                                      "Civillian" = c("Civillian", "Civillian2"),
+                                      "Unemployed" = c("Unemployed"),
+                                      "Armed forces" = c("Armed forces", "Armed forces2"),
+                                      "Not in LF" = c("Not in LF"))
+# Binning the worker class factor levels
+df$Worker_class2 <- fct_collapse(df$Worker_class,
+                                 "Private Employee" = c("Private fpcbi", "Private nfptc"),
+                                 "Government Employee" = c("Local gov emp", "State employee", "Federal employee"),
+                                 "Self employed" = c("Self employed", "Self employed 2"),
+                                 "Working without pay" = c("Working without pay"),
+                                 Unemployed = c("Unemployed"))
+
+# Income adjustment
+df <- df %>%
+  mutate(Income = Total_income * (Income_adjustment / 1000000))
+options(scipen=999)
+
+# Income over the last 12 months adjustment
+df <- df %>%
+  mutate(Income_12_month = Income_12_months * (Income_adjustment / 1000000))
+
+# Removing columns that are no longer needed 
+df$Total_income <- NULL
+df$Income_12_months <- NULL
+df$Income_adjustment <- NULL
+df$Employment_status <- NULL
+df$Worker_class <- NULL
+
+df = rename(df, Employment_status = Employment_status2, Worker_class = Worker_class2)
+
+
+# SUMMARY TABLES
+EducInc.tbl <- with(df, tapply(Income,
+                               INDEX = list(Race, Education), FUN = mean))
+
+kable(EducInc.tbl, format = "markdown")
+
+
+# RACE
+
+# Creating a graph for race
+df %>%
+  ggplot() +
+  geom_bar(mapping = aes(x = Race, fill = Race, weight = Person_weights)) +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Population by race")
+
+# Graph for gender by race and relative prop
+df %>%
+  filter(!is.na(Race)) %>%
+  count(Race, Sex) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  ungroup() %>%
+  ggplot(aes(x = Race, y = percent, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  ylab("Percentage (%)") +
+  ggtitle("Proportion of Race by Sex")
+
+df %>%
+  group_by(Sex, Race) %>%
+  summarise(n = sum(Person_weights)) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n) * 100)) %>%
+  ggplot(aes(x = Race, y = percent, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  ylab("Percentage (%)") +
+  ggtitle("Proportion of Race by Sex")
+
+
+
+# EDUCATION
+
+# Graph for Education levels
+ggplot(df) +
+  geom_bar(mapping = aes(Education, fill = Education)) +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparing Levels of Education")
+
+# Education by Race 
+df %>%
+  count(Race, Education) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  ungroup() %>%
+  ggplot(aes(x = Education, y = percent, fill = Race)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparing Education Based on Race") +
+  ylab("Percentage (%)")
+
+ # Education by Race
+df %>%
+  group_by(Education, Race) %>%
+  summarise(n = sum(Person_weights)) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  ggplot(aes(x = reorder(Education, -percent), y = percent, fill = Race)) +
+  geom_col(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  xlab("Education by degree type") +
+  ylab("Percentage (%)") +
+  ggtitle("Comparing Education Based on Race")
+
+# Average income for education by race 
+df %>%
+  group_by(Race, Education) %>%
+  summarise(incomeaverage = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = reorder(Education, -incomeaverage), y = incomeaverage, fill = Race)) +
+  geom_col(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  xlab("Education") +
+  ylab("Average Income (thousands)") +
+  ggtitle("Comparing Annual Income Based on Education Level")
+
+
+# INCOME
+# Boxplot for Income by race
+ggplot(df) +
+  geom_histogram(aes(Income, weight = Person_weights), alpha = 0.5, bins = 30, fill = "red") +
+  ggtitle("Total Income Distribution") +
+  xlab("Income (1000s)")
+
+# Filtering income greater than/less than 500k, and greater than/less than 250k
+# Histogram
+df %>%
+  filter(Income > 500000) %>%
+  ggplot() +
+  geom_histogram(aes(Income, fill = Race, weight = Person_weights), alpha = 0.5) +
+  scale_fill_brewer(palette = "Set1") +
+  xlab("Income (1000s)") +
+  ggtitle("Distribution of Income by Race greater than $500,000")
+
+# Histogram
+df %>%
+  filter(Income < 250000) %>%
+  ggplot() +
+  geom_histogram(aes(Income, fill = Race, weight = Person_weights), alpha = 0.5) +
+  scale_fill_brewer(palette = "Set1") +
+  xlab("Income (1000s)") +
+  ggtitle("Distribution of Income by Race up to $250,000")
+
+# Boxplot
+df %>%
+  filter(Income < 250000) %>%
+  ggplot(aes(x = Race, y = Income, fill = Race)) +
+  geom_boxplot() +
+  ggtitle("Income by Race under $250,000") +
+  scale_fill_brewer(palette = "Set1")
+  
+# Boxplot
+df %>%
+  filter(Income > 500000) %>%
+  ggplot(aes(x = Race, y = Income, fill = Race)) +
+  geom_boxplot() +
+  ggtitle("Income by Race $500,000+") +
+  scale_fill_brewer(palette = "Set1")
+
+# LAYOFF
+# Graph for layoffs by race 
+df %>%
+  count(Race, Layoff) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n) * 100)) %>%
+  ggplot(aes(x = Layoff, y = percent, fill = Race)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparing Layoffs by Race") +
+  xlab("Layoffs") +
+  ylab("Percent (%)")
+
+df %>%
+  group_by(Race, Layoff) %>%
+  summarise(n = sum(Person_weights)) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  filter(Layoff == "Yes") %>%
+  ggplot(aes(x = Layoff, y = percent, fill = Race)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparing Layoffs by Race") +
+  xlab("Layoffs") +
+  ylab("Percent (%)")
+ 
+
+# proportions of worker class by race
+df %>%
+  filter(!is.na(Worker_class)) %>%
+  group_by(Worker_class, Race) %>%
+  summarise(n = sum(Person_weights)) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  ggplot(aes(x = Worker_class, y = percent, fill = Race)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  xlab("Class of worker") +
+  ylab("Percentage (%)") +
+  ggtitle("Comparsion of Class of Worker by Race")
+
+# Next 2 here are comparisons (government is slightly higher than priv. but still lower) and government hours are similar but pay less
+# bargraph for private employees (race, income)
+df %>%
+  filter(Worker_class == "Private Employee") %>%
+  group_by(Race) %>%
+  summarise(incomeaverage = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Race, y = incomeaverage, fill = Race)) +
+  geom_col(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  xlab("Race") +
+  ylab("Income (1000s)") +
+  ggtitle("Comparison of Annual Income by Race for Private Employees")
+
+# bargraph for government employees (race, income)
+df %>%
+  filter(Worker_class == "Government Employee") %>%
+  group_by(Race) %>%
+  summarise(incomeaverage = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Race, y = incomeaverage, fill = Race)) +
+  geom_col(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  xlab("Race") +
+  ylab("Income (1000s)") +
+  ggtitle("Comparison of Annual Income by Race for Government Jobs")
+
+df %>%
+  filter(Worker_class == "Private Employee") %>%
+  group_by(Race, Hours_worked) %>%
+  summarise(incomeaverage = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = incomeaverage, color = Race)) +
+  geom_point() +
+  scale_color_manual(values = c("Red", "Blue")) +
+  xlab("Hours") +
+  ylab("Income (1000s)") +
+  ggtitle("Annual Income by Hours Worked for Private Employees")
+
+df %>%
+  filter(Worker_class == "Government Employee") %>%
+  group_by(Race, Hours_worked) %>%
+  summarise(incomeaverage = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = incomeaverage, color = Race)) +
+  geom_point() +
+  scale_color_manual(values = c("Red", "Blue")) +
+  xlab("Hours") +
+  ylab("Income (1000s)") +
+ggtitle("Annual Income by Hours Worked for Government Jobs")
+
+
+# HOURS WORKED
+# Income vs hours worked by race
+df %>%
+  group_by(Race, Hours_worked) %>%
+  summarise(averageincome = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = averageincome, color = Race)) +
+  geom_point() +
+  scale_color_manual(values=c("red", "blue")) +
+  ggtitle("Annual Income by Race for Hours Worked") +
+  xlab("Hours") +
+  ylab("Income (1000s)")
+
+# Income vs hours worked by education
+degrees <- c("HS_diploma", "Bachelors", "Masters", "Prof_Deg")
+df %>%
+  filter(Education %in% degrees) %>%
+  group_by(Education, Hours_worked) %>%
+  summarise(averageincome = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = averageincome, color = Education)) +
+  geom_point() +
+  scale_color_manual(values = c("purple", "green", "blue", "red")) +
+  ggtitle("Annual Income for Education Level for Hours Worked") +
+  xlab("Hours") +
+  ylab("Income (1000s)")
+
+# income vs hours worked for high school by race 
+hsdegree <- c("HS_diploma")
+df %>%
+  filter(Education %in% hsdegree) %>%
+  group_by(Race, Hours_worked) %>%
+  summarise(averageincome = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = averageincome, color = Race)) +
+  geom_point() +
+  scale_color_manual(values = c("red", "blue")) +
+  ggtitle("Annual Income by Hours Worked for High School Diplomas") +
+  xlab("Hours") +
+  ylab("Income (1000s)")
+
+# income vs hours worked for bachelors by race 
+bachelorsdeg <- c("Bachelors")
+df %>%
+  filter(Education %in% bachelorsdeg) %>%
+  group_by(Race, Hours_worked) %>%
+  summarise(averageincome = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = averageincome, color = Race)) +
+  geom_point() +
+  scale_color_manual(values = c("red", "blue")) +
+  ggtitle("Annual Income by Hours Worked for Bachelors Degree") +
+  xlab("Hours") +
+  ylab("Income (1000s)")
+
+# income vs hours worked for prof.deg by race 
+profdeg <- c("Prof_Deg")
+df %>%
+  filter(Education %in% profdeg) %>%
+  group_by(Race, Hours_worked) %>%
+  summarise(averageincome = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = averageincome, color = Race)) +
+  geom_point() +
+  scale_color_manual(values = c("red", "blue")) +
+  ggtitle("Annual Income by Hours Worked for Professional Degrees") +
+  xlab("Hours") +
+  ylab("Income (1000s)")
+
+# Stacked plots to save space
+df %>%
+  filter(Education %in% degrees) %>%
+  group_by(Race, Hours_worked, Education) %>%
+  summarise(averageincome = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = Hours_worked, y = averageincome, color = Race)) +
+  geom_point() +
+  facet_grid(vars(Education), scales = "free") +
+  scale_color_manual(values = c("red", "blue")) +
+  ggtitle("Annual Income for Hours Worked by Education") +
+  xlab("Hours") +
+  ylab("Income (1000s)")
+
+
+# EMPLOYMENT STATUS 
+# graph for emp. status by race
+df %>%
+  filter(!is.na(Employment_status)) %>%
+  count(Race, Employment_status) %>%
+  group_by(Race) %>%
+  mutate(percent = (n / sum(n)) * 100) %>%
+  ungroup() %>%
+  ggplot(aes(x = Employment_status, y = percent, fill = Race)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set1")
+
+
+# Graph for region by Race 
+ggplot(df) +
+  geom_bar(mapping = aes(Region5, fill = Race), position = "dodge") +
+  scale_fill_brewer(palette = "Set1")
+
+# bargraph for race by region5
+df %>%
+  group_by(Race, Region5) %>%
+  summarise(incomeaverage = weighted.mean(Income, Person_weights)) %>%
+  ggplot(aes(x = reorder(Region5, -incomeaverage), y = incomeaverage, fill = Race)) +
+  geom_col(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  xlab("Region") +
+  ylab("Average Income (thousands)") +
+  ggtitle("Comparing Annual Income Based on Region by Race")
+
+# Commute time by race
+df %>%
+  filter(!is.na(Commute_time)) %>%
+  group_by(Race) %>%
+  ggplot(aes(x = Commute_time, fill = Race, color = Race, weight = Person_weights)) +
+  geom_histogram(bins = 30) +
+  scale_fill_brewer(palette = "Set1") +
+  ggtitle("Comparison of Commute Time by Race") +
+  xlab("Commute Time (minutes)")
+```
+
